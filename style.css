@@ -1,0 +1,22 @@
+.singleGrid
+{
+	
+	background-color: lightyellow;
+	position:absolute;
+	font-family: 微软雅黑,consolas;
+	color: white;
+	word-wrap: break-word;
+	
+	overflow: hidden
+}
+
+
+
+.interface
+{
+	position:absolute;
+	width:220px;
+	font-family: 微软雅黑;
+	display: none;
+}
+

@@ -1,0 +1,437 @@
+
+elements = {}
+
+iterateSolve = (range, func, initGuess, tolarence) ->
+	error = 100
+	iterCount = 0
+	guess = initGuess
+	delta = 1e-3
+	while error > tolarence and iterCount < 1000
+		y1 = func guess
+		y2 = func guess*(1+delta)
+		slope = (y2 - y1)/delta
+		console.warn guess
+		console.warn slope
+
+		if slope != 0 and y1 != 0
+			nextGuess = guess - y1 / slope
+			error = 2*(guess-nextGuess)/(guess+nextGuess)*100
+			error=Math.abs(error)
+		else if y1 = 0
+			return guess
+		else
+			console.warn "Unexpected error, slope = 0"
+			return ""
+		guess=nextGuess
+		iterCount=iterCount+1
+		console.warn "error:",error
+	return if iterCount<1000 then guess else ''
+
+modeSolve = (para) ->
+	n1= para.n1
+	n2=para.n2
+	n3=para.n3
+	a=para['2a']/2
+	lambda=para.lambda
+	if DEBUG
+		console.info para
+	thetaC2=Math.asin n2/n1
+	thetaC3=Math.asin n3/n1
+	modeMax = Math.floor(4*a/lambda*n1*Math.cos(Math.max(thetaC2,thetaC3)))
+	result={
+		'TE':{}
+		'TM':{}
+	}
+	result['modeMax']=modeMax
+	for i in [0..modeMax]
+		f = (x) ->
+			4*a*(2*Math.PI / lambda)*n1*Math.cos(x)-2*Math.atan(Math.sqrt(n1*n1*Math.sin(x)*Math.sin(x)-n2*n2) / (n1*Math.cos(x)))-2*Math.atan(Math.sqrt(n1*n1*Math.sin(x)*Math.sin(x)-n3*n3) / (n1*Math.cos(x)))-2*Math.PI*i
+		theta = iterateSolve([],f,Math.PI/2-0.1,0.000001)
+		result['TE']['TE'+i]={}
+		result['TE']['TE'+i]['theta']=theta
+		result['TE']['TE'+i]['thetaD']=theta/Math.PI*180
+		console.info theta/Math.PI*180	
+	for i in [0..modeMax]
+		f = (x) ->
+			4*a*(2*Math.PI / lambda)*n1*Math.cos(x)-2*Math.atan(n1*n1 / (n2 * n2)*Math.sqrt(n1*n1*Math.sin(x)*Math.sin(x)-n2*n2) / (n1*Math.cos(x)))-2*Math.atan(n1*n1 / (n3 * n3)*Math.sqrt(n1*n1*Math.sin(x)*Math.sin(x)-n3*n3) / (n1*Math.cos(x)))-2*Math.PI*i
+		theta = iterateSolve([],f,Math.PI/2-0.1,0.000001)
+		result['TM']['TM'+i]={}
+		result['TM']['TM'+i]['theta']=theta
+		result['TM']['TM'+i]['thetaD']=theta/Math.PI*180
+		console.info theta/Math.PI*180	
+
+	if DEBUG
+		console.info thetaC2,thetaC3,modeMax
+	return result
+
+
+
+getCoeff = (bdConf,x,y,direction=0,timeStep=0) -> #zero means left-right,one means top-bottom
+	switch bdConf.type
+		when 1
+			return [1e30*bdConf.temp(timeStep), -1e30]
+		when 2
+			switch direction
+				when 0 
+					return [bdConf.coeff*globalConf.deltaY, 0]
+				when 1
+					return [bdConf.coeff*globalConf.deltaX, 0]
+		when 3
+			switch direction
+				when 0
+					return [bdConf.temp(timeStep)*bdConf.coeff*globalConf.deltaY, -bdConf.coeff*globalConf.deltaY]
+				when 1
+					return [bdConf.temp(timeStep)*bdConf.coeff*globalConf.deltaX, -bdConf.coeff*globalConf.deltaX]
+
+
+
+class borderConf  
+	constructor: (@type,@temp,@coeff) ->
+
+
+
+class gridPoint
+
+	constructor: (@x, @y) ->
+		generateStr = '''<div id="grid_'''+@x+'_'+@y+'''" class="singleGrid"></div>'''
+		@divObject = $(generateStr).appendTo $("body")[0]
+		if @x==1
+			@divObject.css "left", ((@x-1)*globalConf.deltaX*globalConf.zoom+100)
+			@divObject.css "width", globalConf.deltaX*globalConf.zoom/2
+		else if @x==globalConf.gridX
+			@divObject.css "left", ((@x-1.5)*globalConf.deltaX*globalConf.zoom+100)
+			@divObject.css "width", globalConf.deltaX*globalConf.zoom/2
+		else
+			@divObject.css "left", ((@x-1.5)*globalConf.deltaX*globalConf.zoom+100)
+			@divObject.css "width", globalConf.deltaX*globalConf.zoom
+		
+		if @y==globalConf.gridY
+			@divObject.css "top", ((globalConf.gridY-@y)*globalConf.deltaY*globalConf.zoom+100)
+			@divObject.css "height", globalConf.deltaY*globalConf.zoom/2
+		else if @y==1
+			@divObject.css "top", ((globalConf.gridY-@y-0.5)*globalConf.deltaY*globalConf.zoom+100)
+			@divObject.css "height", globalConf.deltaY*globalConf.zoom/2
+		else
+			@divObject.css "top", ((globalConf.gridY-@y-0.5)*globalConf.deltaY*globalConf.zoom+100)
+			@divObject.css "height", globalConf.deltaY*globalConf.zoom
+		
+		@history=[[0]]
+		@iterTime=[0]
+		@current=10
+		@timeStepElapsed=0
+	iterateOnce: (timeStep=0) ->
+		if !(@history[timeStep]?)
+			@history[timeStep]=[0]
+
+		if !(@iterTime[timeStep]?)
+			@iterTime[timeStep]=0
+
+		if timeStep != 0
+			c = -@history[timeStep-1][@iterTime[timeStep-1]]*globalConf.deltaY*globalConf.deltaX/(2*globalConf.a*globalConf.deltaT)
+			d = globalConf.deltaY*globalConf.deltaX/(2*globalConf.a*globalConf.deltaT)
+		else 
+			c = 0
+			d = 0
+
+		if @x == 1 
+			[al, bl] = getCoeff globalConf.borders.left, @x, @y, 0, timeStep
+			ar = globalConf.lambda*globalConf.deltaY/globalConf.deltaX*grids[@x+1][@y].getNewest(timeStep)
+			br = -globalConf.lambda*globalConf.deltaY/globalConf.deltaX
+		else if @x == globalConf.gridX
+			[ar,br] = getCoeff globalConf.borders.right, @x, @y, 0, timeStep
+			al = globalConf.lambda*globalConf.deltaY/globalConf.deltaX*grids[@x-1][@y].getNewest(timeStep)
+			bl = -globalConf.lambda*globalConf.deltaY/globalConf.deltaX
+		else
+			al = globalConf.lambda*globalConf.deltaY/globalConf.deltaX*grids[@x-1][@y].getNewest(timeStep)
+			bl = -globalConf.lambda*globalConf.deltaY/globalConf.deltaX
+			ar = globalConf.lambda*globalConf.deltaY/globalConf.deltaX*grids[@x+1][@y].getNewest(timeStep)
+			br = -globalConf.lambda*globalConf.deltaY/globalConf.deltaX
+		if (@y == 1 or @y == globalConf.gridY)
+			al /= 2
+			ar /= 2
+			bl /= 2
+			br /= 2
+			c /= 2
+			d /= 2
+
+		if @y == 1
+			[at, bt] = getCoeff globalConf.borders.bottom, @x, @y, 1, timeStep
+			ab = globalConf.lambda*globalConf.deltaX/globalConf.deltaY*grids[@x][@y+1].getNewest(timeStep)
+			bb = -globalConf.lambda*globalConf.deltaX/globalConf.deltaY
+		else if @y == globalConf.gridY
+			[ab, bb] = getCoeff globalConf.borders.top, @x, @y, 1, timeStep
+			at = globalConf.lambda*globalConf.deltaX/globalConf.deltaY*grids[@x][@y-1].getNewest(timeStep)
+			bt = -globalConf.lambda*globalConf.deltaX/globalConf.deltaY
+		else
+			ab = globalConf.lambda*globalConf.deltaX/globalConf.deltaY*grids[@x][@y+1].getNewest(timeStep)
+			bb = -globalConf.lambda*globalConf.deltaX/globalConf.deltaY
+			at = globalConf.lambda*globalConf.deltaX/globalConf.deltaY*grids[@x][@y-1].getNewest(timeStep)
+			bt = -globalConf.lambda*globalConf.deltaX/globalConf.deltaY
+		if (@x == 1 or @x == globalConf.gridX)
+			at /= 2
+			bt /= 2
+			bb /= 2
+			ab /= 2
+			c /= 2
+			d /= 2
+		
+		@iterTime[timeStep] += 1
+		@history[timeStep][@iterTime[timeStep]] = -(al+ar+at+ab-c)/(bl+br+bt+bb-d)
+
+		
+		@current = @history[timeStep][@iterTime[timeStep]]
+
+		#alert (@history[timeStep][@iterTime[timeStep]]- @history[timeStep][(@iterTime[timeStep]) - 1])
+		#@divObject[0].innerHTML = @history[@iterTime]
+		#_t=@iterTime[timeStep] - 1
+		#alert ((Math.abs(@history[timeStep][@iterTime[timeStep]] - @history[timeStep][@iterTime[timeStep] - 1])))
+		if (Math.abs(@history[timeStep][@iterTime[timeStep]] - @history[timeStep][@iterTime[timeStep] - 1]) < globalConf.errorMax)
+			goodEnough = true
+		else
+			goodEnough = false 
+		#alert goodEnough
+		goodEnough
+
+	rollbackTo: (time) ->
+		@divObject[0].innerHTML = @history[time]
+		@current = @history[time]
+
+	updateDisplayData: () ->
+		@divObject[0].innerHTML = @current
+
+	getCurrent: () ->
+		@current
+
+	setCurrent: (timeFrame) ->
+		@current = (@history[timeFrame][@iterTime[timeFrame]])
+	getNewest: (timeStep) ->
+		if !(@history[timeStep]?)
+			@history[timeStep]=[0]
+		if !(@iterTime[timeStep]?)
+			@iterTime[timeStep]=0
+
+		@history[timeStep][@iterTime[timeStep]]
+
+globalConf = 
+	"deltaX":0.01
+	"deltaY":0.01
+	"zoom":4000
+	"gridX":25
+	"gridY":5
+	"borders":
+		"left": new borderConf 3, ((timeStep) -> 22), 6
+		"right": new borderConf 3, ((timeStep) -> 5+10*Math.sin(0.2618 * timeStep * globalConf.deltaT)), 25
+		"top": new borderConf 2, 0, 0
+		"bottom": new borderConf 2, 0, 0
+	"errorMax":0.0005
+	"lambda": 1
+	"a":3.17e-3
+	"deltaT": 0.1 #count in hour
+
+
+grids=[[]]		
+
+
+
+
+
+iterateAllOnce = (timeStep) ->
+	for i in [1..globalConf.gridX]
+		for j in [1..globalConf.gridY]
+			do (i,j) ->
+				grids[i][j].iterateOnce(timeStep)
+
+iterateAll = (times) ->
+
+	for k in [1..times]
+		if k%1000 == 0 
+			recolorAll()
+		for i in [1..globalConf.gridX]
+			for j in [1..globalConf.gridY]
+				grids[i][j].iterateOnce()
+
+maxVal = 0
+minVal = 1e10
+recolorAll = () ->
+	maxVal=0
+	minVal=10e10
+	for i in [1..globalConf.gridX]
+		for j in [1..globalConf.gridY]
+			do (i,j) ->
+				maxVal= if grids[i][j].getCurrent() > maxVal then grids[i][j].getCurrent() else maxVal
+				minVal= if grids[i][j].getCurrent() < minVal then grids[i][j].getCurrent() else minVal
+	for i in [1..globalConf.gridX]
+		for j in [1..globalConf.gridY]
+			do (i,j) ->
+				#alert ("RGB("+(255-grids[i][j].getCurrent()/(maxVal-minVal))+",0,0)")
+				R=Math.round((grids[i][j].getCurrent()-minVal)/ (maxVal-minVal)*200+55)
+				B=Math.round(200-(grids[i][j].getCurrent()-minVal)/(maxVal-minVal)*200)
+				grids[i][j].divObject.css("backgroundColor", ("RGB("+R+",0,"+B+")"))			
+viewbackTo = (iterTime) ->
+	for i in [1..globalConf.gridX]
+		for j in [1..globalConf.gridY]
+			grids[i][j].rollbackTo(iterTime)
+			recolorAll()
+
+viewTimePoint = (timeFrame) ->
+	for i in [1..globalConf.gridX]
+		for j in [1..globalConf.gridY]
+			grids[i][j].setCurrent timeFrame
+			grids[i][j].updateDisplayData()
+	recolorAll()
+iterateToEnough = (timeFrame,maxTime) ->
+	accurateEnough=false
+	for k in [1..maxTime]
+		if accurateEnough
+			for i in [1..globalConf.gridX]
+				for j in [1..globalConf.gridY]
+					grids[i][j].updateDisplayData()
+			recolorAll()
+			return k
+		accurateEnough = true
+		for i in [1..globalConf.gridX]
+			for j in [1..globalConf.gridY]
+				__t =(true == grids[i][j].iterateOnce(timeFrame))
+				accurateEnough = __t
+	recolorAll()
+	for i in [1..globalConf.gridX]
+			for j in [1..globalConf.gridY]
+				grids[i][j].updateDisplayData()
+	return -1
+initialize = () ->
+	$(".singleGrid").remove()
+	grids=[]
+	for i in [1..globalConf.gridX]
+		for j in [1..globalConf.gridY]
+			do (i,j) ->
+				if not grids[i]?
+					grids[i]=[]
+				grids[i][j] = new gridPoint i, j
+	for i in [0..60]
+		iterateToEnough(i,50000)
+
+paraExample =
+	{
+		'n1':2.5
+		'n2':1.2
+		'n3':1.5
+		'lambda':632.8
+		'2a':200
+	}
+results = []
+plotData = []
+DEBUG = true
+an1=an2=an3=alambda=a2a=0
+indicatingString=''
+$ =>
+	DEBUG = true
+
+	# ctx = $("#myChart").get(0).getContext("2d");
+	r = modeSolve paraExample
+	data=
+		'labels' : ('TX'+i) for i in [0 .. r['modeMax']]
+		"datasets" :
+			[
+				{
+					'label' : 'TE'
+					"data" : r['TE']['TE'+i]['thetaD'] for i in [0 .. r['modeMax']]
+				},
+				# {
+				# 	'label' : 'TM'
+				# 	"data" : r['TM']['TM'+i]['thetaD'] for i in [0 .. r['modeMax']]
+				# }
+			]
+	
+	options = 
+		datasetFill : true#false
+	
+	console.info data,options
+	# myNewChart = new Chart(ctx).Line(data,options);
+	# for lambda in [100 .. 3500] by 100
+	# 	paraExample['lambda']=lambda
+	# 	results[lambda/100-1] = modeSolve paraExample
+
+	# plotData = for once, key in results
+	# 	lambda=(key+1)*100
+	# 	$("#result"+TX)[0].innerHTML=$("#result"+TX)[0].innerHTML+""+3e17/lambda+","
+	# 	for i in [0 .. results[0]['modeMax']]
+	# 		$("#result"+TX)[0].innerHTML = $("#result"+TX)[0].innerHTML + if once['TE']['TE'+i]? then Math.sin(once['TE']['TE'+i]['theta'])*Math.PI*2/lambda*paraExample['n1'] else NaN
+	# 		$("#result"+TX)[0].innerHTML = $("#result"+TX)[0].innerHTML + ','
+	# 	$("#result"+TX)[0].innerHTML = $("#result"+TX)[0].innerHTML + '<br>'
+	# 	[(key+1)*100, Math.sin(once['TE']['TE0']['theta'])]
+	
+	mainHandler = () ->
+		an1=eval(calculatePara['n1'].value)
+		if not an1.hasOwnProperty "length" then an1=[an1]
+		an2=eval(calculatePara['n2'].value)
+		if not an2.hasOwnProperty "length" then an2=[an2]
+		an3=eval(calculatePara['n3'].value)
+		if not an3.hasOwnProperty "length" then an3=[an3]
+		alambda=eval(calculatePara['lambda'].value)
+		if not alambda.hasOwnProperty "length" then alambda=[alambda]
+		a2a=eval(calculatePara['2a'].value)
+		if not a2a.hasOwnProperty "length" then a2a=[a2a] 
+		for TX in ["TE","TM"]
+			$("#result"+TX)[0].innerHTML=''
+		tempPara={}
+		console.info "!"
+		for n1 in an1
+			for n2 in an2
+				for n3 in an3
+					for lambda in alambda
+						for _2a in a2a
+							tempPara=
+								'n1':n1
+								'n2':n2
+								'n3':n3
+								'lambda':lambda
+								'2a':_2a
+							result = modeSolve tempPara
+							once = result
+							for TX in ["TE","TM"]
+								
+								$("#result"+TX)[0].innerHTML=$("#result"+TX)[0].innerHTML+""+3e17/lambda+","+n1+','+n2+','+n3+','+_2a+','
+								for i in [0 .. once['modeMax']]
+									$("#result"+TX)[0].innerHTML = $("#result"+TX)[0].innerHTML + if once[TX][TX+i]? then Math.sin(once[TX][TX+i]['theta'])*Math.PI*2/lambda*n1 else NaN
+									$("#result"+TX)[0].innerHTML = $("#result"+TX)[0].innerHTML + ','
+								$("#result"+TX)[0].innerHTML = $("#result"+TX)[0].innerHTML + '<br>'
+		$(btnCalMode)[0].innerHTML=indicatingString
+		$(btnCalMode)[0].disabled=false
+
+
+	$(btnCalMode)[0].addEventListener 'click', ()->
+		indicatingString=$(btnCalMode)[0].innerHTML
+		$(btnCalMode)[0].innerHTML='<span style="background:black;color:black;text-shadow:none"><del>少女</del></span>祈祷中...'
+		$(btnCalMode)[0].disabled=true
+		# $(btnCalMode)[0].trigger('resize')
+		# $(window).trigger('resize');
+		# mainHandler()
+		setTimeout(mainHandler,50)
+		
+	# initialize()
+	# for i in [4,11,21]
+	# 	for j in [0,10,20,30,40,50,60]
+	# 		alert i+" "+j+" "+grids[i][3].history[j][grids[i][3].iterTime[j]]
+	# $(divButtonRefresh).bind "click",()->
+	# 	globalConf.gridX = parseInt(divGridX.value)
+	# 	globalConf.gridY = parseInt(divGridY.value)
+	# 	globalConf.deltaX = parseFloat(divAllX.value)/(globalConf.gridX-1)
+	# 	globalConf.deltaY = parseFloat(divAllY.value)/(globalConf.gridY-1)
+	# 	globalConf.zoom = parseInt(divZoom.value)
+	# 	initialize()
+	
+	# $("body").delegate ".singleGrid","mousemove",(event) ->
+	# 	divInfoDisplay.innerHTML=this.innerHTML
+	# 	$(divInfoDisplay).css "backgroundColor",$(this).css("backgroundColor")
+
+	# $(divButtonToggleTransparent).bind "click",()->
+	# 	switch this.value
+	# 		when "hidetext"
+	# 			this.value = "showtext"
+	# 			$(".singleGrid").css "color","transparent"
+	# 		when "showtext"
+	# 			this.value = "hidetext"
+	# 			$(".singleGrid").css "color","white"
+
+	# $(divButtonViewTimeFrame).bind "click",()->
+	# 	viewTimePoint parseInt(divTimePoint.value)
